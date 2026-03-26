@@ -4,6 +4,8 @@ import pydicom
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import generate_uid, ExplicitVRLittleEndian
 
+#TODO: Poprawić filtrowanie na prostych obrazach działa dobrze, dla trudnych ale z dużym kontrasem też, ale np dla shepp-logan'a jest gorzej, trzeba by znaleźć lepszy filtr, albo poprawić ten, żeby nie wzmacniał szumu
+
 def wyznacz_pozycje_czujnikow(stopnie_alfa, n, rozpietosc_stopnie, promien_r, srodek_x, srodek_y):
     alfa = np.radians(stopnie_alfa)
     phi = np.radians(rozpietosc_stopnie)
