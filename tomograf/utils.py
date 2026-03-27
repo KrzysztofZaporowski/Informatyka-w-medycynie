@@ -4,8 +4,6 @@ import pydicom
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import generate_uid, ExplicitVRLittleEndian
 
-#TODO: Poprawić filtrowanie na prostych obrazach działa dobrze, dla trudnych ale z dużym kontrasem też, ale np dla shepp-logan'a jest gorzej, trzeba by znaleźć lepszy filtr, albo poprawić ten, żeby nie wzmacniał szumu
-
 def wyznacz_pozycje_czujnikow(stopnie_alfa, n, rozpietosc_stopnie, promien_r, srodek_x, srodek_y):
     alfa = np.radians(stopnie_alfa)
     phi = np.radians(rozpietosc_stopnie)
@@ -138,3 +136,64 @@ def zapisz_dicom(obraz, nazwa_pliku, dane_pacjenta, data_badania, komentarze):
     plt.title(f"Zapisany DICOM\nPacjent: {wczytany_dicom.PatientName}, ID: {wczytany_dicom.PatientID}")
     plt.show()
     
+def rekonstrukcja_obrazu(wymiar_x, wymiar_y, liczba_detektorow, liczba_skanow, rozpietosc, sinogram):
+    srodek_x = wymiar_x / 2
+    srodek_y = wymiar_y / 2
+    promien = max(wymiar_x, wymiar_y) * 0.7
+    delta_alfa = 360 / liczba_skanow
+
+    rekonstruowany_obraz = np.zeros((wymiar_x, wymiar_y))
+
+    for skan in range(liczba_skanow):
+        aktualny_kat = skan * delta_alfa
+
+        emiter, detektory = wyznacz_pozycje_czujnikow(aktualny_kat, liczba_detektorow, rozpietosc, promien, srodek_x, srodek_y)
+
+        for i, detektor in enumerate(detektory):
+            x0, y0 = int(emiter[0]), int(emiter[1])
+            x1, y1 = int(detektor[0]), int(detektor[1])
+
+            linia_pikseli = bresenham(x0, y0, x1, y1)
+
+            for piksel in linia_pikseli:
+                x, y = piksel
+                if 0 <= x < wymiar_x and 0 <= y < wymiar_y:
+                    rekonstruowany_obraz[x, y] += sinogram[i, skan]
+
+    # Normalizacja obrazu do zakresu [0, 1]
+    max_val = np.max(rekonstruowany_obraz)
+
+    if max_val > 0:
+        rekonstruowany_obraz = rekonstruowany_obraz / max_val
+
+    return rekonstruowany_obraz
+
+def stworz_sinogram(wymiar_x, wymiar_y, liczba_detektorow, liczba_skanow, rozpietosc, image):
+    srodek_x = wymiar_x / 2
+    srodek_y = wymiar_y / 2
+    promien = max(wymiar_x, wymiar_y) * 0.7
+    delta_alfa = 360 / liczba_skanow
+
+    sinogram = np.zeros((liczba_detektorow, liczba_skanow))
+
+    for skan in range(liczba_skanow):
+        aktualny_kat = skan * delta_alfa
+
+        emiter, detektory = wyznacz_pozycje_czujnikow(aktualny_kat, liczba_detektorow, rozpietosc, promien, srodek_x, srodek_y)
+
+        for i, detektor in enumerate(detektory):
+            x0, y0 = int(emiter[0]), int(emiter[1])
+            x1, y1 = int(detektor[0]), int(detektor[1])
+
+            linia_pikseli = bresenham(x0, y0, x1, y1)
+
+            suma_jasnosci = 0
+
+            for piksel in linia_pikseli:
+                x, y = piksel
+                if 0 <= x < wymiar_x and 0 <= y < wymiar_y:
+                    suma_jasnosci += image[x, y]
+
+            sinogram[i, skan] = suma_jasnosci
+
+    return sinogram
