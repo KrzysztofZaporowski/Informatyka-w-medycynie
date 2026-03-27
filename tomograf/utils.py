@@ -256,7 +256,7 @@ def rekonstrukcja_obrazu(wymiar_x, wymiar_y, liczba_detektorow, liczba_skanow, r
             x0, y0 = int(emiter[0]), int(emiter[1])
             x1, y1 = int(detektor[0]), int(detektor[1])
 
-            linia_pikseli = bresenham(x0, y0, x1, y1)
+            linia_pikseli = bresenham.bresenham(x0, y0, x1, y1)
 
             for piksel in linia_pikseli:
                 x, y = piksel
@@ -264,6 +264,7 @@ def rekonstrukcja_obrazu(wymiar_x, wymiar_y, liczba_detektorow, liczba_skanow, r
                     rekonstruowany_obraz[x, y] += sinogram[i, skan]
 
     # Normalizacja obrazu do zakresu [0, 1]
+    rekonstruowany_obraz[rekonstruowany_obraz < 0] = 0
     max_val = np.max(rekonstruowany_obraz)
 
     if max_val > 0:
