@@ -1,5 +1,6 @@
 import numpy as np
 import bresenham
+import matplotlib.pyplot as plt
 
 def wyznacz_pozycje_czujnikow(stopnie_alfa, n, rozpietosc_stopnie, promien_r, srodek_x, srodek_y):
     alfa = np.radians(stopnie_alfa)
@@ -40,11 +41,13 @@ def policz_mse(obraz_oryginalny, obraz_rekonstrukcji):
     mse = np.mean((ori_norm - rek_norm) ** 2)
     return mse
     
-def rekonstrukcja_obrazu(wymiar_x, wymiar_y, liczba_detektorow, liczba_skanow, rozpietosc, sinogram):
+def rekonstrukcja_obrazu(wymiar_x, wymiar_y, liczba_detektorow, liczba_skanow, rozpietosc, sinogram, obraz_oryginalny):
     srodek_x = wymiar_x / 2
     srodek_y = wymiar_y / 2
     promien = max(wymiar_x, wymiar_y) * 0.7
     delta_alfa = 360 / liczba_skanow
+
+    historia_mse = []
 
     rekonstruowany_obraz = np.zeros((wymiar_x, wymiar_y))
 
@@ -64,6 +67,13 @@ def rekonstrukcja_obrazu(wymiar_x, wymiar_y, liczba_detektorow, liczba_skanow, r
                 if 0 <= x < wymiar_x and 0 <= y < wymiar_y:
                     rekonstruowany_obraz[x, y] += sinogram[i, skan]
 
+        if skan % 10 == 0:  # Co 10 skanów oblicz MSE
+            tymczasowy_obraz = np.copy(rekonstruowany_obraz)
+            tymczasowy_obraz[tymczasowy_obraz < 0] = 0
+
+            aktualne_mse = policz_mse(obraz_oryginalny, tymczasowy_obraz)
+            historia_mse.append(aktualne_mse)
+
     # Normalizacja obrazu do zakresu [0, 1]
     rekonstruowany_obraz[rekonstruowany_obraz < 0] = 0
     max_val = np.max(rekonstruowany_obraz)
@@ -71,7 +81,7 @@ def rekonstrukcja_obrazu(wymiar_x, wymiar_y, liczba_detektorow, liczba_skanow, r
     if max_val > 0:
         rekonstruowany_obraz = rekonstruowany_obraz / max_val
 
-    return rekonstruowany_obraz
+    return rekonstruowany_obraz, historia_mse
 
 def stworz_sinogram(wymiar_x, wymiar_y, liczba_detektorow, liczba_skanow, rozpietosc, image):
     srodek_x = wymiar_x / 2
@@ -102,3 +112,22 @@ def stworz_sinogram(wymiar_x, wymiar_y, liczba_detektorow, liczba_skanow, rozpie
             sinogram[i, skan] = suma_jasnosci
 
     return sinogram
+
+def policz_mse(obraz_oryginalny, obraz_rekonstruowany):
+    max_ori = np.max(obraz_oryginalny)
+    ori_norm = obraz_oryginalny / max_ori if max_ori > 0 else obraz_oryginalny
+
+    max_rek = np.max(obraz_rekonstruowany)
+    rek_norm = obraz_rekonstruowany / max_rek if max_rek > 0 else obraz_rekonstruowany
+
+    mse = np.mean((ori_norm - rek_norm) ** 2)
+    return mse
+
+def pokaz_historię_mse(historia_mse, tytul='Spadek błędu MSE podczas rekonstrukcji'):
+    plt.figure(figsize=(10, 5))
+    plt.plot(historia_mse, marker='o')
+    plt.title(tytul)
+    plt.xlabel('Numer skanu (co 10 skanów)')
+    plt.ylabel('Błąd MSE')
+    plt.grid()
+    plt.show()
