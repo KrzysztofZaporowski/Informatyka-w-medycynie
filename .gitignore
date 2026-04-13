@@ -1,0 +1,15 @@
+@"
+# IDE
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Generated outputs
+tomograf/dicom/*.dcm
+"@ | Out-File -Encoding utf8 .gitignore
