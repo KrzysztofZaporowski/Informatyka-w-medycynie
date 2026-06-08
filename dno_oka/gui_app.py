@@ -18,13 +18,38 @@ from gui_guard import (
 )
 from image_processing import get_overlay, preprocess_image, segment_vessels
 
-METHODS = ['Filtr Frangi', 'Filtr Sato', 'Klasyfikator ML']
-
-last_metrics = {}
+METHODS = [
+    'Filtr Frangi',
+    'Filtr Sato',
+    'Klasyfikator ML',
+    'Sieć neuronowa (CNN)',
+]
 
 
 def _status(html):
     get_widget('status_label').value = html
+
+
+def _ensure_models_trained(num_train):
+    from gui_guard import _gui_context as ctx
+
+    get_is_ml_trained = ctx['get_is_ml_trained']
+    get_is_dnn_trained = ctx['get_is_dnn_trained']
+    train_ml_model = ctx['train_ml_model']
+    train_dnn_model = ctx['train_dnn_model']
+
+    if not get_is_ml_trained():
+        _status(
+            '<p>⏳ <b>Krok 1/3:</b> Trenowanie klasyfikatora ML '
+            f'na {num_train} zdjęciach...</p>'
+        )
+        train_ml_model(num_train)
+    if not get_is_dnn_trained():
+        _status(
+            '<p>⏳ <b>Krok 2/3:</b> Trenowanie sieci CNN '
+            f'na {num_train} zdjęciach... (może potrwać 2-5 min)</p>'
+        )
+        train_dnn_model(num_train)
 
 
 def _display_results(img_name):
@@ -37,9 +62,11 @@ def _display_results(img_name):
     manual_dir = ctx['manual_dir']
     mask_dir = ctx['mask_dir']
     ml_segmenter = ctx['ml_segmenter']
-    train_ml_model = ctx['train_ml_model']
-    get_is_ml_trained = ctx['get_is_ml_trained']
+    dnn_segmenter = ctx['dnn_segmenter']
     num_slider = get_widget('num_images_to_train')
+
+    _ensure_models_trained(num_slider.value)
+    _status('<p>⏳ <b>Krok 3/3:</b> Segmentacja wszystkimi metodami...</p>')
 
     img_path = os.path.join(images_dir, img_name)
     image = cv2.imread(img_path)
@@ -56,18 +83,17 @@ def _display_results(img_name):
     preprocessed = preprocess_image(image_rgb)
 
     results = {}
-    for method in METHODS:
-        if method == 'Klasyfikator ML' and not get_is_ml_trained():
-            _status(
-                '<p>⏳ <b>Krok 1/2:</b> Trenowanie modelu ML na '
-                f'{num_slider.value} zdjęciach... (może potrwać 1-2 min)</p>'
-            )
-            train_ml_model(num_slider.value)
+    for i, method in enumerate(METHODS, start=1):
+        _status(
+            f'<p>⏳ <b>Krok 3/3:</b> Segmentacja ({i}/{len(METHODS)}): '
+            f'<b>{method}</b>...</p>'
+        )
         detected = segment_vessels(
             preprocessed,
             method=method,
             mask=fov_mask,
             ml_segmenter=ml_segmenter,
+            dnn_segmenter=dnn_segmenter,
         )
         overlay = get_overlay(image_rgb, detected)
         metrics = calculate_metrics(manual_mask, detected, mask=fov_mask)
@@ -78,11 +104,12 @@ def _display_results(img_name):
         }
         last_metrics[method] = metrics
 
+    n_methods = len(METHODS)
     output = get_widget('output')
     with output:
         clear_output(wait=True)
 
-        fig, axes = plt.subplots(3, 3, figsize=(18, 14))
+        fig, axes = plt.subplots(3, n_methods, figsize=(6 * n_methods, 14))
         fig.suptitle(
             f'Wyniki segmentacji naczyń: {img_name}',
             fontsize=16,
@@ -90,17 +117,19 @@ def _display_results(img_name):
         )
 
         axes[0, 0].imshow(image_rgb)
-        axes[0, 0].set_title('Oryginał', fontsize=13)
+        axes[0, 0].set_title('Oryginał', fontsize=12)
         axes[0, 0].axis('off')
 
         axes[0, 1].imshow(manual_mask, cmap='gray')
-        axes[0, 1].set_title('Maska ekspercka (Ground Truth)', fontsize=13)
+        axes[0, 1].set_title('Maska ekspercka (GT)', fontsize=12)
         axes[0, 1].axis('off')
-        axes[0, 2].axis('off')
+
+        for col in range(2, n_methods):
+            axes[0, col].axis('off')
 
         for i, method in enumerate(METHODS):
             axes[1, i].imshow(results[method]['detected'], cmap='gray')
-            axes[1, i].set_title(f'{method}\n(wykryte naczynia)', fontsize=12)
+            axes[1, i].set_title(f'{method}\n(wykryte naczynia)', fontsize=11)
             axes[1, i].axis('off')
 
         for i, method in enumerate(METHODS):
@@ -110,35 +139,35 @@ def _display_results(img_name):
                 f'{method} - overlay\n'
                 f'Acc: {m["accuracy"]:.4f}  Sens: {m["sensitivity"]:.4f}\n'
                 f'Spec: {m["specificity"]:.4f}  G-Mean: {m["g_mean"]:.4f}',
-                fontsize=10,
+                fontsize=9,
             )
             axes[2, i].axis('off')
 
         plt.tight_layout()
         plt.show()
 
-        print(f'\n{"STATYSTYKI":^70}')
+        print(f'\n{"STATYSTYKI":^90}')
         print(
-            f'{"Metoda":<20} | {"Accuracy":<10} | {"Sensitivity":<12} | '
+            f'{"Metoda":<24} | {"Accuracy":<10} | {"Sensitivity":<12} | '
             f'{"Specificity":<12} | {"G-Mean":<10}'
         )
-        print('-' * 70)
+        print('-' * 90)
         for method in METHODS:
             m = results[method]['metrics']
             print(
-                f'{method:<20} | {m["accuracy"]:<10.4f} | {m["sensitivity"]:<12.4f} | '
+                f'{method:<24} | {m["accuracy"]:<10.4f} | {m["sensitivity"]:<12.4f} | '
                 f'{m["specificity"]:<12.4f} | {m["g_mean"]:<10.4f}'
             )
 
     set_results_tab(0)
     _status(
-        '<p style="color:green">✅ Analiza zakończona. '
+        '<p style="color:green">✅ Analiza zakończona (4 metody). '
         'Wyniki w zakładce <b>Wyniki analizy</b>.</p>'
     )
 
 
 def execute_analysis():
-    from gui_guard import _gui_context as ctx, _widgets
+    from gui_guard import _widgets
 
     if _widgets is None:
         raise RuntimeError('Najpierw uruchom komórkę GUI.')
@@ -148,20 +177,8 @@ def execute_analysis():
 
     set_buttons_disabled(True)
     try:
-        get_is_ml_trained = ctx['get_is_ml_trained']
-        if not get_is_ml_trained():
-            num = get_widget('num_images_to_train').value
-            _status(
-                '<p>⏳ <b>Krok 1/2:</b> Trenowanie modelu ML na '
-                f'{num} zdjęciach...<br>'
-                '<small>(pierwsze uruchomienie - może potrwać 1-2 minuty)</small></p>'
-            )
-        else:
-            _status('<p>⏳ Przetwarzanie zdjęcia... proszę czekać</p>')
-
         with get_widget('cm_output'):
             clear_output()
-
         _display_results(get_widget('image_select').value)
     finally:
         set_buttons_disabled(False)
@@ -176,14 +193,17 @@ def execute_show_confusion_matrices():
         return
 
     cm_output = get_widget('cm_output')
+    n_methods = len(METHODS)
     with cm_output:
         clear_output(wait=True)
-        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+        fig, axes = plt.subplots(1, n_methods, figsize=(5 * n_methods, 5))
+        if n_methods == 1:
+            axes = [axes]
         fig.suptitle('Macierze pomyłek', fontsize=14, fontweight='bold')
         for i, method in enumerate(METHODS):
             cm = last_metrics[method]['confusion_matrix']
             im = axes[i].imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-            axes[i].set_title(f'{method}', fontsize=12)
+            axes[i].set_title(f'{method}', fontsize=10)
             axes[i].set_xlabel('Predykcja')
             axes[i].set_ylabel('Prawda')
             tick_marks = np.arange(2)
@@ -224,14 +244,17 @@ def execute_reset_ml():
     set_buttons_disabled(True)
     try:
         ctx['set_is_ml_trained'](False)
-        _status('<p>⏳ Ponowne trenowanie modelu ML...</p>')
+        ctx['set_is_dnn_trained'](False)
+        _status('<p>⏳ Ponowne trenowanie ML i CNN...</p>')
         with get_widget('output'):
             clear_output()
         with get_widget('cm_output'):
             clear_output()
-        ctx['train_ml_model'](get_widget('num_images_to_train').value, force=True)
+        n = get_widget('num_images_to_train').value
+        ctx['train_ml_model'](n, force=True)
+        ctx['train_dnn_model'](n, force=True)
         set_results_tab(0)
-        _status('<p style="color:green">✅ Model ML wytrenowany ponownie.</p>')
+        _status('<p style="color:green">✅ Modele ML i CNN wytrenowane ponownie.</p>')
     finally:
         set_buttons_disabled(False)
         analysis_lock.release()
@@ -255,18 +278,26 @@ def display_gui(
     manual_dir,
     mask_dir,
     ml_segmenter,
+    dnn_segmenter,
     train_ml_model,
+    train_dnn_model,
     get_is_ml_trained,
     set_is_ml_trained,
+    get_is_dnn_trained,
+    set_is_dnn_trained,
 ):
     set_gui_context(
         images_dir=images_dir,
         manual_dir=manual_dir,
         mask_dir=mask_dir,
         ml_segmenter=ml_segmenter,
+        dnn_segmenter=dnn_segmenter,
         train_ml_model=train_ml_model,
+        train_dnn_model=train_dnn_model,
         get_is_ml_trained=get_is_ml_trained,
         set_is_ml_trained=set_is_ml_trained,
+        get_is_dnn_trained=get_is_dnn_trained,
+        set_is_dnn_trained=set_is_dnn_trained,
     )
 
     ensure_widgets(image_list)

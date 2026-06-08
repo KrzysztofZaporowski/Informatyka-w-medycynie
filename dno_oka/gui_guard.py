@@ -59,7 +59,7 @@ def ensure_widgets(image_list):
             layout=widgets.Layout(width='220px'),
         ),
         'reset_ml_button': widgets.Button(
-            description='Resetuj i trenuj ML',
+            description='Resetuj ML i CNN',
             button_style='warning',
             icon='refresh',
             layout=widgets.Layout(width='200px'),

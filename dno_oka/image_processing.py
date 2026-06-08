@@ -8,16 +8,24 @@ def preprocess_image(image):
     # Extract green channel
     green_channel = image[:, :, 1]
     
-    # Apply CLAHE
+    # Normalizacja histogramu (CLAHE) + wyostrzenie (unsharp mask) + rozmycie
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     enhanced_green = clahe.apply(green_channel)
-    
-    # Slight denoising - increased blur for better noise suppression
+
+    blurred = cv2.GaussianBlur(enhanced_green, (0, 0), 3)
+    enhanced_green = cv2.addWeighted(enhanced_green, 1.4, blurred, -0.4, 0)
     enhanced_green = cv2.GaussianBlur(enhanced_green, (5, 5), 0)
     
     return enhanced_green
 
-def segment_vessels(preprocessed_image, method='Filtr Frangi', mask=None, sigmas=np.arange(1, 5, 0.5), ml_segmenter=None):
+def segment_vessels(
+    preprocessed_image,
+    method='Filtr Frangi',
+    mask=None,
+    sigmas=np.arange(1, 5, 0.5),
+    ml_segmenter=None,
+    dnn_segmenter=None,
+):
     # Vessel enhancement
     if method == 'Filtr Frangi':
         # beta=0.2 makes the filter more selective for line-like structures (vessels)
@@ -27,8 +35,11 @@ def segment_vessels(preprocessed_image, method='Filtr Frangi', mask=None, sigmas
     elif method == 'Klasyfikator ML':
         if ml_segmenter is None:
             raise ValueError("ml_segmenter must be provided for 'Klasyfikator ML' method")
-        # ML segmenter returns vesselness probability map (0-1)
         vessel_enhanced = ml_segmenter.predict_vesselness(preprocessed_image, mask=mask)
+    elif method == 'Sieć neuronowa (CNN)':
+        if dnn_segmenter is None:
+            raise ValueError("dnn_segmenter must be provided for 'Sieć neuronowa (CNN)' method")
+        vessel_enhanced = dnn_segmenter.predict_vesselness(preprocessed_image, mask=mask)
     else:
         raise ValueError(f"Unknown method: {method}")
     
@@ -45,7 +56,7 @@ def segment_vessels(preprocessed_image, method='Filtr Frangi', mask=None, sigmas
         else:
             thresh = threshold_otsu(vessel_enhanced)
         binary = vessel_enhanced > thresh
-    elif method == 'Klasyfikator ML':
+    elif method in ('Klasyfikator ML', 'Sieć neuronowa (CNN)'):
         binary = vessel_enhanced > 0.5
     else:
         # For Frangi Sauvola works well. 
@@ -55,8 +66,7 @@ def segment_vessels(preprocessed_image, method='Filtr Frangi', mask=None, sigmas
 
     binary_uint8 = (binary.astype(np.uint8) * 255)
 
-    # Extra denoising for ML
-    if method == 'Klasyfikator ML':
+    if method in ('Klasyfikator ML', 'Sieć neuronowa (CNN)'):
         binary_uint8 = cv2.medianBlur(binary_uint8, 3)
 
     if method == 'Filtr Sato':    
