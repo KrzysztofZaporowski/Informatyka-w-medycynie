@@ -71,7 +71,7 @@ def segment_vessels(preprocessed_image, method='Filtr Frangi', mask=None, sigmas
     # Post-processing: remove small objects
     binary_bool = binary_uint8 > 0
     min_obj_size = 150 if method == 'Filtr Sato' else 100
-    cleaned = remove_small_objects(binary_bool, min_size=min_obj_size)
+    cleaned = remove_small_objects(binary_bool, max_size=min_obj_size - 1)
     binary_cleaned = (cleaned.astype(np.uint8) * 255)
     
     return binary_cleaned
