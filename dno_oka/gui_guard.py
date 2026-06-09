@@ -28,15 +28,15 @@ def ensure_widgets(image_list):
         _widgets['num_images_to_train'].max = max(1, len(image_list) - 1)
         return _widgets
 
-    max_train = max(1, len(image_list) - 1)
+    max_train = max(3, len(image_list) - 1)
     _widgets = {
         'image_select': widgets.Dropdown(
             options=image_list,
             description='Zdjęcie:',
         ),
         'num_images_to_train': widgets.IntSlider(
-            value=min(3, max_train),
-            min=1,
+            value=min(15, max_train),
+            min=3,
             max=max_train,
             step=1,
             description='Zdj. do treningu ML:',
@@ -44,6 +44,17 @@ def ensure_widgets(image_list):
             orientation='horizontal',
             readout=True,
             readout_format='d',
+            style={'description_width': 'initial'},
+        ),
+        'downscale_slider': widgets.IntSlider(
+            value=1,
+            min=1,
+            max=2,
+            step=1,
+            description='Pomniejszenie:',
+            continuous_update=False,
+            orientation='horizontal',
+            readout=True,
             style={'description_width': 'initial'},
         ),
         'run_button': widgets.Button(
@@ -107,7 +118,7 @@ def set_buttons_disabled(disabled):
 def build_root():
     global _gui_root
     _gui_root = widgets.VBox([
-        widgets.HBox([_widgets['image_select'], _widgets['num_images_to_train']]),
+        widgets.HBox([_widgets['image_select'], _widgets['num_images_to_train'], _widgets['downscale_slider']]),
         widgets.HBox([
             _widgets['run_button'],
             _widgets['show_cm_button'],
