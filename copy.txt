@@ -1,0 +1,109 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[margin=0.5in, top=0.7in, bottom=0.7in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage[polish]{babel}
+\usepackage{multirow}
+\usepackage{indentfirst}
+\usepackage{multicol}
+\usepackage{float}
+\usepackage{caption}
+
+\usepackage{listings}
+\usepackage{xcolor}
+
+% Definicja kolorów
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstset{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2,
+    language=Python
+}
+
+\begin{document}
+\begin{center}
+    \LARGE Informatyka w Medycynie \\
+    \Large Szczegółowy Raport Techniczny - Detekcja Naczyń Dna Oka \\
+    \vspace{1em}
+    Aleksander Staszewski 160143 \\
+    Krzysztof Zaporowski 160237
+\end{center}
+
+\section{Zastosowany stos technologiczny}
+Projekt został zrealizowany w ekosystemie języka \textbf{Python 3.12}. Wykorzystano zaawansowane biblioteki do przetwarzania obrazów i uczenia maszynowego:
+\begin{itemize}
+    \item \textbf{OpenCV (cv2)}: Wykorzystana jako główny silnik przetwarzania wstępnego oraz do obliczania momentów obrazu.
+    \item \textbf{TensorFlow/Keras}: Framework użyty do implementacji sieci konwolucyjnej (CNN) operującej na małych polach recepcyjnych.
+    \item \textbf{scikit-learn}: Dostarczyła implementację lasu losowego (\textit{Random Forest}) oraz narzędzia do ewaluacji (macierz pomyłek, metryki precyzji).
+    \item \textbf{IPyWidgets}: Umożliwiły stworzenie reaktywnego interfejsu użytkownika wewnątrz środowiska Jupyter.
+\end{itemize}
+
+\section{Szczegółowy opis metodologii}
+
+\subsection{Pipeline przetwarzania wstępnego}
+Kluczowym wyzwaniem w obrazowaniu dna oka jest nierównomierne oświetlenie i niski kontrast naczyń względem tła siatkówki. Proces preprocessingu składa się z następujących etapów:
+\begin{enumerate}
+    \item \textbf{Ekstrakcja kanału zielonego}: Kanał ten charakteryzuje się najwyższym kontrastem dla naczyń krwionośnych.
+    \item \textbf{CLAHE (Contrast Limited Adaptive Histogram Equalization)}: Zastosowano algorytm adaptacyjny z parametrem \texttt{clipLimit=2.0}. W przeciwieństwie do zwykłego wyrównywania histogramu, CLAHE operuje na lokalnych blokach (\textit{tiles}), co zapobiega nadmiernemu wzmocnieniu szumu w jednorodnych obszarach.
+    \item \textbf{Filtracja}: Zastosowanie lekkiego rozmycia Gaussa w celu usunięcia artefaktów kompresji JPG przed ekstrakcją cech.
+\end{enumerate}
+
+\subsection{Klasyfikator ML i inżynieria cech}
+Dla każdego piksela tworzony jest wektor cech opisujący jego otoczenie w oknie $5 \times 5$. Wykorzystano następujące deskryptory:
+\begin{itemize}
+    \item \textbf{Cechy statystyczne}: Średnia lokalna, wariancja oraz odchylenie standardowe jasności pikseli w oknie.
+    \item \textbf{Deskryptory gradientowe}: Magnituda operatora Sobela oraz wynik operatora Laplace'a, pozwalające na wykrycie krawędzi naczyń.
+    \item \textbf{Analiza tekstury i kształtu}: Implementacja 10 momentów (3 centralne oraz 7 momentów Hu). Momenty Hu są niezmiennicze względem przesunięcia, skali i obrotu, co pozwala na stabilne rozpoznawanie fragmentów naczyń niezależnie od ich orientacji.
+    \item \textbf{Filtr Sato}: Specjalistyczny filtr do wykrywania struktur rurkowatych (\textit{vesselness filter}), oparty na analizie wartości własnych macierzy Hessiana.
+\end{itemize}
+
+\subsection{Architektura Sieci Neuronowej (CNN)}
+Model CNN został zaprojektowany do klasyfikacji wycinków $5 \times 5 \times 1$. Składa się z następujących warstw:
+\begin{enumerate}
+    \item \textbf{Conv2D (16 filtrów, $3 \times 3$)}: Ekstrakcja prostych wzorców krawędziowych z aktywacją ReLU.
+    \item \textbf{Conv2D (32 filtry, $3 \times 3$)}: Wykrywanie bardziej złożonych struktur lokalnych.
+    \item \textbf{Flatten}: Przekształcenie map cech $5 \times 5 \times 32$ w wektor o długości 800 elementów.
+    \item \textbf{Dense (64 neurony)}: Warstwa ukryta dokonująca nieliniowej kombinacji cech.
+    \item \textbf{Dropout (0.3)}: Regularyzacja zapobiegająca przeuczeniu modelu na małym zbiorze danych.
+    \item \textbf{Dense (1 neuron)}: Wyjście z funkcją Sigmoid określającą prawdopodobieństwo przynależności piksela do naczynia.
+\end{enumerate}
+
+\section{System trwałości i interakcji}
+\subsection{Mechanizm Persistence}
+W celu optymalizacji czasu pracy, zaimplementowano system zapisu modeli:
+\begin{itemize}
+    \item \textbf{ML}: Zapisywany do \texttt{vessel\_ml.joblib}.
+    \item \textbf{CNN}: Zapisywana do \texttt{vessel\_cnn.h5} (w formacie Keras).
+\end{itemize}
+Przy każdym uruchomieniu aplikacja próbuje wczytać istniejące pliki. W przypadku ich braku, uruchamiany jest automatyczny trening na pierwszych 20 obrazach z bazy danych, co zapewnia powtarzalność wyników.
+
+\subsection{Interfejs Graficzny (GUI)}
+Stworzone GUI pozwala na pełną kontrolę nad procesem:
+\begin{itemize}
+    \item Wybór obrazu testowego z listy rozwijanej.
+    \item Dynamiczna zmiana liczby zdjęć treningowych za pomocą suwaka.
+    \item Przycisk \textbf{Reset}, który wymusza ponowny trening obu modeli (rozwiązując problemy z synchronizacją optymalizatora Keras poprzez wymuszoną rekompilację grafu obliczeniowego).
+    \item Wizualizacja wyników w formie trzech paneli: obrazu oryginalnego z maską ekspercką, mapy binarnej wykrytych naczyń oraz nałożonego overlay'u z metrykami jakości (Accuracy, Sensitivity, G-Mean).
+\end{itemize}
+
+\end{document}

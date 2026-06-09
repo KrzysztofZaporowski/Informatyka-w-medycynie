@@ -19,7 +19,6 @@ from gui_guard import (
 from image_processing import get_overlay, preprocess_image, segment_vessels
 
 METHODS = [
-    'Filtr Frangi',
     'Filtr Sato',
     'Klasyfikator ML',
     'Sieć neuronowa (CNN)',
@@ -161,7 +160,7 @@ def _display_results(img_name):
 
     set_results_tab(0)
     _status(
-        '<p style="color:green">✅ Analiza zakończona (4 metody). '
+        f'<p style="color:green">✅ Analiza zakończona ({len(METHODS)} metody). '
         'Wyniki w zakładce <b>Wyniki analizy</b>.</p>'
     )
 

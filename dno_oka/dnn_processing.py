@@ -92,6 +92,15 @@ class DNNVesselSegmenter:
     def train(self, X, y, epochs=8, batch_size=128):
         if len(X) == 0:
             raise ValueError('Pusty zbiór treningowy dla CNN')
+        
+        # Rekompilacja przed treningiem rozwiązuje błąd "Unknown variable" 
+        # występujący w Keras po wczytaniu modelu z pliku.
+        self.model.compile(
+            optimizer=keras.optimizers.Adam(learning_rate=1e-3),
+            loss='binary_crossentropy',
+            metrics=['accuracy'],
+        )
+        
         self.model.fit(
             X, y,
             epochs=epochs,
@@ -99,6 +108,13 @@ class DNNVesselSegmenter:
             validation_split=0.1,
             verbose=0,
         )
+        self.is_trained = True
+
+    def save(self, path):
+        self.model.save(path)
+
+    def load(self, path):
+        self.model = keras.models.load_model(path)
         self.is_trained = True
 
     def predict_vesselness(self, preprocessed_image, mask=None):

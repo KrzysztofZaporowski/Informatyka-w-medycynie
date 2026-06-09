@@ -106,6 +106,15 @@ class MLVesselSegmenter:
         self.model.fit(X, y)
         self.is_trained = True
 
+    def save(self, path):
+        import joblib
+        joblib.dump(self.model, path)
+
+    def load(self, path):
+        import joblib
+        self.model = joblib.load(path)
+        self.is_trained = True
+
     def predict_vesselness(self, preprocessed_image, mask=None):
         if not self.is_trained:
             raise ValueError("Model not trained")
