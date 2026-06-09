@@ -3,11 +3,12 @@ import numpy as np
 from dnn_processing import DNNVesselSegmenter, prepare_dnn_dataset
 from tqdm import tqdm
 
-# Konfiguracja
-IMAGES_DIR = 'dno_oka/data/images/'
-MANUAL_DIR = 'dno_oka/data/manual/'
-MASK_DIR = 'dno_oka/data/mask/'
-MODEL_SAVE_PATH = 'dno_oka/vessel_cnn.h5'
+# Konfiguracja - ścieżki absolutne względem skryptu
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGES_DIR = os.path.join(BASE_DIR, 'data/images/')
+MANUAL_DIR = os.path.join(BASE_DIR, 'data/manual/')
+MASK_DIR = os.path.join(BASE_DIR, 'data/mask/')
+MODEL_SAVE_PATH = os.path.join(BASE_DIR, 'vessel_cnn.h5')
 
 def train():
     print("🚀 Przygotowanie danych dla CNN (wycinki 5x5 + augmentacja)...")
@@ -32,7 +33,7 @@ def train():
         def on_epoch_end(self, epoch, logs=None):
             print(f" Epoch {epoch+1}: loss={logs['loss']:.4f}, acc={logs['accuracy']:.4f}")
 
-    segmenter.train(X, y, epochs=10, batch_size=256)
+    segmenter.train(X, y, epochs=50, batch_size=512)
     
     print(f"💾 Zapisywanie modelu do {MODEL_SAVE_PATH}...")
     segmenter.save(MODEL_SAVE_PATH)

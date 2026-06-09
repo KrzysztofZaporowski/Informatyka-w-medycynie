@@ -50,60 +50,70 @@
 \end{center}
 
 \section{Zastosowany stos technologiczny}
-Projekt został zrealizowany w ekosystemie języka \textbf{Python 3.12}. Wykorzystano zaawansowane biblioteki do przetwarzania obrazów i uczenia maszynowego:
+Projekt został zrealizowany w języku \textbf{Python 3.12}. Wykorzystano następujące biblioteki:
 \begin{itemize}
-    \item \textbf{OpenCV (cv2)}: Wykorzystana jako główny silnik przetwarzania wstępnego oraz do obliczania momentów obrazu.
-    \item \textbf{TensorFlow/Keras}: Framework użyty do implementacji sieci konwolucyjnej (CNN) operującej na małych polach recepcyjnych.
-    \item \textbf{scikit-learn}: Dostarczyła implementację lasu losowego (\textit{Random Forest}) oraz narzędzia do ewaluacji (macierz pomyłek, metryki precyzji).
-    \item \textbf{IPyWidgets}: Umożliwiły stworzenie reaktywnego interfejsu użytkownika wewnątrz środowiska Jupyter.
+    \item \textbf{OpenCV (cv2)}: Przetwarzanie wstępne obrazów, ekstrakcja kanałów, operacje morfologiczne.
+    \item \textbf{NumPy}: Operacje macierzowe na danych obrazowych.
+    \item \textbf{scikit-image}: Zaawansowane filtry detekcji naczyń (Frangi, Sato) oraz usuwanie małych obiektów.
+    \item \textbf{scikit-learn}: Implementacja lasu losowego (\textit{Random Forest}) oraz metryki ewaluacyjne.
+    \item \textbf{TensorFlow/Keras}: Budowa i trening głębokiej sieci neuronowej (CNN).
+    \item \textbf{Matplotlib}: Wizualizacja wyników i generowanie wykresów do sprawozdania.
 \end{itemize}
 
-\section{Szczegółowy opis metodologii}
+\section{Opis zastosowanych metod}
 
-\subsection{Pipeline przetwarzania wstępnego}
-Kluczowym wyzwaniem w obrazowaniu dna oka jest nierównomierne oświetlenie i niski kontrast naczyń względem tła siatkówki. Proces preprocessingu składa się z następujących etapów:
+\subsection{Przetwarzanie obrazów}
 \begin{enumerate}
-    \item \textbf{Ekstrakcja kanału zielonego}: Kanał ten charakteryzuje się najwyższym kontrastem dla naczyń krwionośnych.
-    \item \textbf{CLAHE (Contrast Limited Adaptive Histogram Equalization)}: Zastosowano algorytm adaptacyjny z parametrem \texttt{clipLimit=2.0}. W przeciwieństwie do zwykłego wyrównywania histogramu, CLAHE operuje na lokalnych blokach (\textit{tiles}), co zapobiega nadmiernemu wzmocnieniu szumu w jednorodnych obszarach.
-    \item \textbf{Filtracja}: Zastosowanie lekkiego rozmycia Gaussa w celu usunięcia artefaktów kompresji JPG przed ekstrakcją cech.
+    \item \textbf{Wstępne (Preprocessing)}:
+    \begin{itemize}
+        \item Ekstrakcja kanału zielonego (najlepszy kontrast naczyń).
+        \item Zastosowanie \textbf{CLAHE} (\texttt{clipLimit=1.5}) dla wyrównania histogramu przy ograniczeniu wzmocnienia szumu.
+        \item Wyostrzenie subtelne (\textit{unsharp masking}) oraz lekkie rozmycie Gaussa dla wygładzenia artefaktów.
+    \end{itemize}
+    \item \textbf{Właściwe (Vessel Enhancement)}:
+    \begin{itemize}
+        \item Wykorzystanie filtrów \textbf{Frangi} i \textbf{Sato} do wstępnego uwypuklenia struktur rurkowatych.
+    \end{itemize}
+    \item \textbf{Końcowe (Post-processing)}:
+    \begin{itemize}
+        \item Filtracja medianowa (5x5) do usunięcia szumu typu "sól i pieprz".
+        \item Zamknięcie morfologiczne dla połączenia przerwanych segmentów naczyń.
+        \item Usuwanie obiektów mniejszych niż 200 pikseli (\texttt{remove\_small\_objects}).
+    \end{itemize}
 \end{enumerate}
 
-\subsection{Klasyfikator ML i inżynieria cech}
-Dla każdego piksela tworzony jest wektor cech opisujący jego otoczenie w oknie $5 \times 5$. Wykorzystano następujące deskryptory:
+\subsection{Uczenie Maszynowe i Sieci Neuronowe}
+Zaimplementowano dwa zaawansowane modele klasyfikacyjne operujące na wycinkach $5 \times 5$:
 \begin{itemize}
-    \item \textbf{Cechy statystyczne}: Średnia lokalna, wariancja oraz odchylenie standardowe jasności pikseli w oknie.
-    \item \textbf{Deskryptory gradientowe}: Magnituda operatora Sobela oraz wynik operatora Laplace'a, pozwalające na wykrycie krawędzi naczyń.
-    \item \textbf{Analiza tekstury i kształtu}: Implementacja 10 momentów (3 centralne oraz 7 momentów Hu). Momenty Hu są niezmiennicze względem przesunięcia, skali i obrotu, co pozwala na stabilne rozpoznawanie fragmentów naczyń niezależnie od ich orientacji.
-    \item \textbf{Filtr Sato}: Specjalistyczny filtr do wykrywania struktur rurkowatych (\textit{vesselness filter}), oparty na analizie wartości własnych macierzy Hessiana.
+    \item \textbf{Inżynieria cech (Wspólna dla ML i CNN)}: Dla każdego piksela obliczany jest wektor 17 cech: średnia lokalna, wariancja, odchylenie standardowe, magnituda Sobela, Laplacian, odpowiedzi filtrów Frangi i Sato oraz 10 momentów obrazu (centralne i Hu).
+    \item \textbf{Klasyfikator ML (Random Forest)}: Las 100 drzew decyzyjnych uczony na zbalansowanym zbiorze (undersampling tła).
+    \item \textbf{Sieć Neuronowa (CNN)}: Głęboka architektura przyjmująca 17 kanałów wejściowych (cechy). Zawiera warstwy \texttt{Conv2D} (64, 128 filtrów), \texttt{BatchNormalization} oraz \texttt{Dropout} (0.4). Dzięki zastosowaniu cech jako kanałów, sieć znacznie skuteczniej wyodrębnia strukturę naczynia niż na surowych pikselach.
 \end{itemize}
 
-\subsection{Architektura Sieci Neuronowej (CNN)}
-Model CNN został zaprojektowany do klasyfikacji wycinków $5 \times 5 \times 1$. Składa się z następujących warstw:
-\begin{enumerate}
-    \item \textbf{Conv2D (16 filtrów, $3 \times 3$)}: Ekstrakcja prostych wzorców krawędziowych z aktywacją ReLU.
-    \item \textbf{Conv2D (32 filtry, $3 \times 3$)}: Wykrywanie bardziej złożonych struktur lokalnych.
-    \item \textbf{Flatten}: Przekształcenie map cech $5 \times 5 \times 32$ w wektor o długości 800 elementów.
-    \item \textbf{Dense (64 neurony)}: Warstwa ukryta dokonująca nieliniowej kombinacji cech.
-    \item \textbf{Dropout (0.3)}: Regularyzacja zapobiegająca przeuczeniu modelu na małym zbiorze danych.
-    \item \textbf{Dense (1 neuron)}: Wyjście z funkcją Sigmoid określającą prawdopodobieństwo przynależności piksela do naczynia.
-\end{enumerate}
+\section{Analiza wyników - Test Hold-Out}
+Ewaluacja została przeprowadzona na zbiorze testowym 5 obrazów (nieuczestniczących w treningu). Wyznaczono średnie wyniki:
 
-\section{System trwałości i interakcji}
-\subsection{Mechanizm Persistence}
-W celu optymalizacji czasu pracy, zaimplementowano system zapisu modeli:
-\begin{itemize}
-    \item \textbf{ML}: Zapisywany do \texttt{vessel\_ml.joblib}.
-    \item \textbf{CNN}: Zapisywana do \texttt{vessel\_cnn.h5} (w formacie Keras).
-\end{itemize}
-Przy każdym uruchomieniu aplikacja próbuje wczytać istniejące pliki. W przypadku ich braku, uruchamiany jest automatyczny trening na pierwszych 20 obrazach z bazy danych, co zapewnia powtarzalność wyników.
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+\textbf{Metoda} & \textbf{Acc} & \textbf{Sens} & \textbf{Spec} & \textbf{G-Mean} \\ \hline
+Filtr Sato & 0.9468 & 0.6246 & 0.9784 & 0.7815 \\ \hline
+Klasyfikator ML (RF) & 0.9193 & 0.8505 & 0.9258 & 0.8869 \\ \hline
+\textbf{Sieć neuronowa (CNN)} & \textbf{0.9293} & \textbf{0.8062} & \textbf{0.9413} & \textbf{0.8711} \\ \hline
+\textbf{CNN (Próg 0.5)} & \textbf{0.8739} & \textbf{0.9088} & \textbf{0.8717} & \textbf{0.8900} \\ \hline
+\end{tabular}
+\caption{Średnie wyniki na zbiorze testowym hold-out.}
+\end{table}
 
-\subsection{Interfejs Graficzny (GUI)}
-Stworzone GUI pozwala na pełną kontrolę nad procesem:
-\begin{itemize}
-    \item Wybór obrazu testowego z listy rozwijanej.
-    \item Dynamiczna zmiana liczby zdjęć treningowych za pomocą suwaka.
-    \item Przycisk \textbf{Reset}, który wymusza ponowny trening obu modeli (rozwiązując problemy z synchronizacją optymalizatora Keras poprzez wymuszoną rekompilację grafu obliczeniowego).
-    \item Wizualizacja wyników w formie trzech paneli: obrazu oryginalnego z maską ekspercką, mapy binarnej wykrytych naczyń oraz nałożonego overlay'u z metrykami jakości (Accuracy, Sensitivity, G-Mean).
-\end{itemize}
+\textbf{Wnioski:} Poprawiona sieć neuronowa osiągnęła najwyższy wynik \textbf{G-Mean = 0.89}, przewyższając klasyczny klasyfikator ML. Zastosowanie wielokanałowych cech wejściowych pozwoliło na drastyczną poprawę czułości (Sensitivity) względem pierwotnej wersji modelu.
+
+\section{Wizualizacja}
+W aplikacji Jupyter Notebook zaimplementowano funkcję \texttt{run\_holdout\_evaluation()}, która dla każdego obrazu wyświetla:
+1. Nazwę pliku,
+2. Zestawienie 5 obrazów: Oryginał, Maska ekspercka, Wynik Sato, ML i CNN,
+3. Tabelę z metrykami dla danego zdjęcia.
+
+Pozwala to na precyzyjną ocenę jakości segmentacji w miejscach trudnych, takich jak skrzyżowania naczyń czy drobne naczynia włosowate.
 
 \end{document}

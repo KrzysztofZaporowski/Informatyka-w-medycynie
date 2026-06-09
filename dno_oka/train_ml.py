@@ -5,11 +5,12 @@ import joblib
 from tqdm import tqdm
 from ml_processing import MLVesselSegmenter, prepare_dataset
 
-# Konfiguracja
-IMAGES_DIR = 'dno_oka/data/images/'
-MANUAL_DIR = 'dno_oka/data/manual/'
-MASK_DIR = 'dno_oka/data/mask/'
-MODEL_SAVE_PATH = 'dno_oka/vessel_ml.joblib'
+# Konfiguracja - ścieżki absolutne względem skryptu
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGES_DIR = os.path.join(BASE_DIR, 'data/images/')
+MANUAL_DIR = os.path.join(BASE_DIR, 'data/manual/')
+MASK_DIR = os.path.join(BASE_DIR, 'data/mask/')
+MODEL_SAVE_PATH = os.path.join(BASE_DIR, 'vessel_ml.joblib')
 
 def train():
     print("🚀 Rozpoczynam przygotowanie danych dla ML...")
