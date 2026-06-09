@@ -10,8 +10,8 @@ except ImportError:
     TF_AVAILABLE = False
 
 
-def prepare_dnn_dataset(image_paths, manual_paths, mask_paths, patch_size=5, max_samples=10000, augment=False):
-    """Losowe, zbalansowane wycinki 5x5 z opcjonalną augmentacją (rotacje)."""
+def prepare_dnn_dataset(image_paths, manual_paths, mask_paths, patch_size=5, max_samples=15000, augment=True):
+    """Przygotowuje zbalansowany zbiór z naciskiem na trudne przykłady (brzegi naczyń)."""
     from image_processing import preprocess_image
     from tqdm import tqdm
 
@@ -19,63 +19,72 @@ def prepare_dnn_dataset(image_paths, manual_paths, mask_paths, patch_size=5, max
     patches = []
     labels = []
 
-    print("Przygotowywanie wycinków dla CNN...")
+    print("Przygotowywanie wysokiej jakości wycinków dla CNN...")
     for img_p, man_p, mask_p in tqdm(zip(image_paths, manual_paths, mask_paths), total=len(image_paths)):
         img = cv2.imread(img_p)
-        if img is None:
-            continue
+        if img is None: continue
         manual = cv2.imread(man_p, cv2.IMREAD_GRAYSCALE)
         mask = cv2.imread(mask_p, cv2.IMREAD_GRAYSCALE)
 
         variants = [(img, manual, mask)]
         if augment:
-            for angle in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180, cv2.ROTATE_90_COUNTERCLOCKWISE]:
-                variants.append((
-                    cv2.rotate(img, angle),
-                    cv2.rotate(manual, angle),
-                    cv2.rotate(mask, angle)
-                ))
+            variants.append((cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE), 
+                             cv2.rotate(manual, cv2.ROTATE_90_CLOCKWISE), 
+                             cv2.rotate(mask, cv2.ROTATE_90_CLOCKWISE)))
 
         for v_img, v_man, v_mask in variants:
             preprocessed = preprocess_image(v_img)
             padded = np.pad(preprocessed, half, mode='reflect')
             
-            coords = np.argwhere(v_mask > half)
-            vessel_coords = coords[v_man[coords[:, 0], coords[:, 1]] > 0]
-            non_vessel_coords = coords[v_man[coords[:, 0], coords[:, 1]] == 0]
+            # Find vessel boundaries (Hard Examples)
+            kernel = np.ones((3,3), np.uint8)
+            dilated = cv2.dilate(v_man, kernel, iterations=1)
+            eroded = cv2.erode(v_man, kernel, iterations=1)
+            boundaries = cv2.absdiff(dilated, eroded)
+            
+            coords_vessel = np.argwhere((v_man > 0) & (v_mask > 0))
+            coords_boundary = np.argwhere((boundaries > 0) & (v_mask > 0))
+            coords_background = np.argwhere((v_man == 0) & (v_mask > 0))
 
-            if len(vessel_coords) == 0 or len(non_vessel_coords) == 0:
-                continue
+            if len(coords_vessel) == 0 or len(coords_background) == 0: continue
 
             per_variant = max_samples // (len(image_paths) * len(variants))
-            per_class = min(len(vessel_coords), len(non_vessel_coords), per_variant // 2)
-            
-            if per_class == 0:
-                continue
+            # Sample 40% vessels, 40% boundaries (hard), 20% background
+            n_v = int(per_variant * 0.4)
+            n_b = int(per_variant * 0.4)
+            n_bg = per_variant - n_v - n_b
 
-            idx_v = np.random.choice(len(vessel_coords), per_class, replace=False)
-            idx_nv = np.random.choice(len(non_vessel_coords), per_class, replace=False)
-            sel = np.vstack([vessel_coords[idx_v], non_vessel_coords[idx_nv]])
+            # Guard against small counts
+            n_v = min(n_v, len(coords_vessel))
+            n_b = min(n_b, len(coords_boundary))
+            n_bg = min(n_bg, len(coords_background))
+
+            idx_v = np.random.choice(len(coords_vessel), n_v, replace=False)
+            idx_b = np.random.choice(len(coords_boundary), n_b, replace=False)
+            idx_bg = np.random.choice(len(coords_background), n_bg, replace=False)
+            
+            sel = np.vstack([coords_vessel[idx_v], coords_boundary[idx_b], coords_background[idx_bg]])
 
             for r, c in sel:
                 pr, pc = r + half, c + half
                 patch = padded[pr - half:pr + half + 1, pc - half:pc + half + 1]
-                patch = patch.astype(np.float32) / 255.0
+                patch = (patch.astype(np.float32) - 127.5) / 127.5
                 patches.append(patch[..., np.newaxis])
                 labels.append(1 if v_man[r, c] > 0 else 0)
 
-    X = np.array(patches, dtype=np.float32)
-    y = np.array(labels, dtype=np.int32)
-    return X, y
+    return np.array(patches, dtype=np.float32), np.array(labels, dtype=np.int32)
 
 
 def _build_cnn(patch_size=5):
     model = keras.Sequential([
         keras.layers.Input(shape=(patch_size, patch_size, 1)),
-        keras.layers.Conv2D(16, 3, activation='relu', padding='same'),
         keras.layers.Conv2D(32, 3, activation='relu', padding='same'),
+        keras.layers.BatchNormalization(),
+        keras.layers.Conv2D(64, 3, activation='relu', padding='same'),
+        keras.layers.BatchNormalization(),
         keras.layers.Flatten(),
-        keras.layers.Dense(64, activation='relu'),
+        keras.layers.Dense(128, activation='relu'),
+        keras.layers.BatchNormalization(),
         keras.layers.Dropout(0.3),
         keras.layers.Dense(1, activation='sigmoid'),
     ], name='vessel_patch_cnn')
@@ -100,12 +109,11 @@ class DNNVesselSegmenter:
         self.model = _build_cnn(patch_size)
         self.is_trained = False
 
-    def train(self, X, y, epochs=8, batch_size=128):
+    def train(self, X, y, epochs=15, batch_size=128):
         if len(X) == 0:
             raise ValueError('Pusty zbiór treningowy dla CNN')
         
-        # Rekompilacja przed treningiem rozwiązuje błąd "Unknown variable" 
-        # występujący w Keras po wczytaniu modelu z pliku.
+        # Rekompilacja przed treningiem
         self.model.compile(
             optimizer=keras.optimizers.Adam(learning_rate=1e-3),
             loss='binary_crossentropy',
@@ -132,59 +140,65 @@ class DNNVesselSegmenter:
         if not self.is_trained:
             raise ValueError('Model CNN nie jest wytrenowany')
 
-        # Build FCN model on the fly or use cached
+        # 1. Image Resolution for prediction
+        h_orig, w_orig = preprocessed_image.shape
+        max_dim = 1024  
+        scale = 1.0
+        if max(h_orig, w_orig) > max_dim:
+            scale = max_dim / max(h_orig, w_orig)
+            h_new, w_new = int(h_orig * scale), int(w_orig * scale)
+            img_to_proc = cv2.resize(preprocessed_image, (w_new, h_new), interpolation=cv2.INTER_AREA)
+        else:
+            img_to_proc = preprocessed_image
+
+        # 2. Build or use cached FCN model
         if not hasattr(self, '_fcn_model') or self._fcn_model is None:
             self._fcn_model = self._convert_to_fcn(self.model)
 
-        h, w = preprocessed_image.shape
-        tile_size = 1024 # Increased for speed
-        margin = 32
+        h, w = img_to_proc.shape
         
-        padded_img = np.pad(preprocessed_image.astype(np.float32), margin, mode='reflect')
-        output = np.zeros((h, w), dtype=np.float32)
+        # Consistent normalization with training
+        normalized_img = (img_to_proc.astype(np.float32) - 127.5) / 127.5
+        tile_input = normalized_img[np.newaxis, ..., np.newaxis]
+        
+        # 3. Optimized model execution
+        try:
+            # training=False is CRITICAL for BatchNormalization behavior
+            probs_full = self._fcn_model(tile_input, training=False).numpy()[0, :, :, 0]
+            output_small = probs_full
+        except Exception as e:
+            # Fallback for memory constraints
+            output_small = np.zeros((h, w), dtype=np.float32)
+            tile_size = 512 
+            for y in range(0, h, tile_size):
+                for x in range(0, w, tile_size):
+                    y_e, x_e = min(y + tile_size, h), min(x + tile_size, w)
+                    t_in = normalized_img[y:y_e, x:x_e][np.newaxis, ..., np.newaxis]
+                    t_p = self._fcn_model(t_in, training=False).numpy()[0, :, :, 0]
+                    output_small[y:y_e, x:x_e] = t_p
 
-        # Iterate over tiles - fewer tiles means less overhead
-        for y in range(0, h, tile_size):
-            for x in range(0, w, tile_size):
-                y_end = min(y + tile_size, h)
-                x_end = min(x + tile_size, w)
-                
-                # Extract tile with margin
-                tile_with_margin = padded_img[y : y_end + 2*margin, x : x_end + 2*margin]
-                tile_input = (tile_with_margin / 255.0)[np.newaxis, ..., np.newaxis]
-                
-                # Fast model call instead of .predict()
-                tile_probs = self._fcn_model(tile_input, training=False).numpy()[0, :, :, 0]
-                
-                h_area = y_end - y
-                w_area = x_end - x
-                output[y:y_end, x:x_end] = tile_probs[margin : margin + h_area, margin : margin + w_area]
+        # 4. Upscale back to original size
+        if scale != 1.0:
+            output = cv2.resize(output_small, (w_orig, h_orig), interpolation=cv2.INTER_CUBIC)
+        else:
+            output = output_small
 
         if mask is not None:
             output[mask == 0] = 0
             
-        return output
+        return np.clip(output, 0, 1)
 
 
     def _convert_to_fcn(self, model):
         """Dynamically converts a patch-based CNN to a Fully Convolutional Network."""
         from tensorflow.keras import layers, Model
-        
-        # Determine input depth from the first layer
-        input_depth = 1
-        for layer in model.layers:
-            if hasattr(layer, 'input_shape'):
-                input_depth = layer.input_shape[-1]
-                break
-            elif hasattr(layer, 'get_weights') and len(layer.get_weights()) > 0:
-                input_depth = layer.get_weights()[0].shape[2]
-                break
+        import tensorflow as tf
 
-        inp = layers.Input(shape=(None, None, input_depth))
+        inp = layers.Input(shape=(None, None, 1))
         x = inp
         
-        dense_count = 0
         layers_map = []
+        dense_idx = 0
         
         for layer in model.layers:
             if isinstance(layer, layers.Conv2D):
@@ -200,17 +214,14 @@ class DNNVesselSegmenter:
                 new_layer = layers.BatchNormalization()
                 x = new_layer(x)
                 layers_map.append((layer, new_layer))
-            elif isinstance(layer, layers.Activation):
-                new_layer = layers.Activation(layer.activation)
-                x = new_layer(x)
-                layers_map.append((layer, new_layer))
             elif isinstance(layer, layers.Dense):
-                dense_count += 1
-                if dense_count == 1:
+                dense_idx += 1
+                # Use same padding to maintain dimensions in FCN mode
+                if dense_idx == 1:
                     new_layer = layers.Conv2D(
                         filters=layer.units,
                         kernel_size=self.patch_size,
-                        padding='same',
+                        padding='same', 
                         activation=layer.activation,
                     )
                 else:
@@ -222,7 +233,7 @@ class DNNVesselSegmenter:
                     )
                 x = new_layer(x)
                 layers_map.append((layer, new_layer))
-            elif isinstance(layer, layers.Flatten) or isinstance(layer, layers.Dropout):
+            elif isinstance(layer, (layers.Flatten, layers.Dropout)):
                 continue
         
         fcn = Model(inp, x)
@@ -235,12 +246,10 @@ class DNNVesselSegmenter:
             if isinstance(orig, layers.Dense):
                 w_dense, b_dense = w
                 if new.kernel_size[0] > 1:
-                    # First dense: reshape (patch*patch*depth_in, units) -> (patch, patch, depth_in, units)
                     depth_in = w_dense.shape[0] // (self.patch_size * self.patch_size)
                     w_new = w_dense.reshape((self.patch_size, self.patch_size, depth_in, orig.units))
                     new.set_weights([w_new, b_dense])
                 else:
-                    # Subsequent dense: reshape (depth_in, units) -> (1, 1, depth_in, units)
                     w_new = w_dense.reshape((1, 1, w_dense.shape[0], w_dense.shape[1]))
                     new.set_weights([w_new, b_dense])
             else:

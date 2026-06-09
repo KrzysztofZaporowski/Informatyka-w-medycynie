@@ -8,13 +8,14 @@ def preprocess_image(image):
     # Extract green channel
     green_channel = image[:, :, 1]
     
-    # Normalizacja histogramu (CLAHE) + wyostrzenie (unsharp mask) + rozmycie
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    # Refined CLAHE: lower clipLimit to reduce background noise
+    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
     enhanced_green = clahe.apply(green_channel)
 
-    blurred = cv2.GaussianBlur(enhanced_green, (0, 0), 3)
-    enhanced_green = cv2.addWeighted(enhanced_green, 1.4, blurred, -0.4, 0)
-    enhanced_green = cv2.GaussianBlur(enhanced_green, (5, 5), 0)
+    # Subtle sharpening
+    blurred = cv2.GaussianBlur(enhanced_green, (0, 0), 2)
+    enhanced_green = cv2.addWeighted(enhanced_green, 1.3, blurred, -0.3, 0)
+    enhanced_green = cv2.GaussianBlur(enhanced_green, (3, 3), 0)
     
     return enhanced_green
 
@@ -28,7 +29,6 @@ def segment_vessels(
 ):
     # Vessel enhancement
     if method == 'Filtr Frangi':
-        # beta=0.2 makes the filter more selective for line-like structures (vessels)
         vessel_enhanced = frangi(preprocessed_image, sigmas=sigmas, beta=0.2, black_ridges=True)
     elif method == 'Filtr Sato':
         vessel_enhanced = sato(preprocessed_image, sigmas=sigmas, black_ridges=True)
@@ -50,38 +50,37 @@ def segment_vessels(
     
     # Thresholding
     if method == 'Filtr Sato':
-        if mask is not None:
-            # Oblicz Otsu tylko dla pikseli wewnątrz maski oka
-            thresh = threshold_otsu(vessel_enhanced[mask > 0])
-        else:
-            thresh = threshold_otsu(vessel_enhanced)
+        thresh = threshold_otsu(vessel_enhanced[mask > 0]) if mask is not None else threshold_otsu(vessel_enhanced)
         binary = vessel_enhanced > thresh
     elif method in ('Klasyfikator ML', 'Sieć neuronowa (CNN)'):
-        binary = vessel_enhanced > 0.5
+        # High confidence threshold for ML/CNN to further reduce noise
+        binary = vessel_enhanced > 0.55
     else:
-        # For Frangi Sauvola works well. 
-        k_val = 0.5 
-        thresh_sauvola = threshold_sauvola(vessel_enhanced, window_size=25, k=k_val)
+        thresh_sauvola = threshold_sauvola(vessel_enhanced, window_size=25, k=0.5)
         binary = vessel_enhanced > thresh_sauvola
 
     binary_uint8 = (binary.astype(np.uint8) * 255)
 
+    # Stronger noise removal for ML/CNN
     if method in ('Klasyfikator ML', 'Sieć neuronowa (CNN)'):
-        binary_uint8 = cv2.medianBlur(binary_uint8, 3)
+        # 5x5 Median filter is very effective for pepper noise
+        binary_uint8 = cv2.medianBlur(binary_uint8, 5)
+        # Morphological closing to connect broken vessels
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        binary_uint8 = cv2.morphologyEx(binary_uint8, cv2.MORPH_CLOSE, kernel)
 
     if method == 'Filtr Sato':    
-    
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         binary_uint8 = cv2.morphologyEx(binary_uint8, cv2.MORPH_CLOSE, kernel)
     
-    # Apply mask if provided
+    # Apply mask
     if mask is not None:
         binary_uint8 = cv2.bitwise_and(binary_uint8, binary_uint8, mask=mask)
     
-    # Post-processing: remove small objects
+    # Final cleanup
     binary_bool = binary_uint8 > 0
-    min_obj_size = 150 if method == 'Filtr Sato' else 100
-    cleaned = remove_small_objects(binary_bool, max_size=min_obj_size - 1)
+    min_obj_size = 200 if method in ('Klasyfikator ML', 'Sieć neuronowa (CNN)') else 100
+    cleaned = remove_small_objects(binary_bool, min_size=min_obj_size)
     binary_cleaned = (cleaned.astype(np.uint8) * 255)
     
     return binary_cleaned
