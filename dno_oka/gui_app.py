@@ -31,24 +31,38 @@ def _status(html):
 
 def _ensure_models_trained(num_train):
     from gui_guard import _gui_context as ctx
+    from ml_processing import prepare_dataset
+    from dnn_processing import prepare_dnn_dataset
+    import os
 
     get_is_ml_trained = ctx['get_is_ml_trained']
     get_is_dnn_trained = ctx['get_is_dnn_trained']
-    train_ml_model = ctx['train_ml_model']
-    train_dnn_model = ctx['train_dnn_model']
+    ml_segmenter = ctx['ml_segmenter']
+    dnn_segmenter = ctx['dnn_segmenter']
+    images_dir = ctx['images_dir']
+    manual_dir = ctx['manual_dir']
+    mask_dir = ctx['mask_dir']
+
+    image_files = sorted([f for f in os.listdir(images_dir) if f.endswith(('.jpg', '.JPG', '.png'))])
+    train_images = image_files[:num_train]
+    
+    img_paths = [os.path.join(images_dir, f) for f in train_images]
+    man_paths = [os.path.join(manual_dir, os.path.splitext(f)[0] + '.tif') for f in train_images]
+    mask_paths = [os.path.join(mask_dir, os.path.splitext(f)[0] + '_mask.tif') for f in train_images]
 
     if not get_is_ml_trained():
-        _status(
-            '<p>⏳ <b>Krok 1/3:</b> Trenowanie klasyfikatora ML '
-            f'na {num_train} zdjęciach...</p>'
-        )
-        train_ml_model(num_train)
+        _status(f'<p>⏳ <b>Krok 1/2:</b> Przygotowanie danych i trening ML ({num_train} zdj. + obroty)...</p>')
+        X, y = prepare_dataset(img_paths, man_paths, mask_paths, augment=True)
+        ml_segmenter.train(X, y)
+        ctx['set_is_ml_trained'](True)
+        ml_segmenter.save('dno_oka/vessel_ml.joblib')
+
     if not get_is_dnn_trained():
-        _status(
-            '<p>⏳ <b>Krok 2/3:</b> Trenowanie sieci CNN '
-            f'na {num_train} zdjęciach... (może potrwać 2-5 min)</p>'
-        )
-        train_dnn_model(num_train)
+        _status(f'<p>⏳ <b>Krok 2/2:</b> Przygotowanie danych i trening CNN ({num_train} zdj. + obroty)...</p>')
+        X, y = prepare_dnn_dataset(img_paths, man_paths, mask_paths, augment=True)
+        dnn_segmenter.train(X, y)
+        ctx['set_is_dnn_trained'](True)
+        dnn_segmenter.save('dno_oka/vessel_cnn.h5')
 
 
 def _display_results(img_name):
@@ -63,6 +77,7 @@ def _display_results(img_name):
     ml_segmenter = ctx['ml_segmenter']
     dnn_segmenter = ctx['dnn_segmenter']
     num_slider = get_widget('num_images_to_train')
+    downscale_factor = get_widget('downscale_slider').value
 
     _ensure_models_trained(num_slider.value)
     _status('<p>⏳ <b>Krok 3/3:</b> Segmentacja wszystkimi metodami...</p>')
@@ -78,6 +93,12 @@ def _display_results(img_name):
     fov_mask = cv2.imread(
         os.path.join(mask_dir, base_name + '_mask.tif'), cv2.IMREAD_GRAYSCALE
     )
+
+    if downscale_factor > 1:
+        new_size = (image_rgb.shape[1] // downscale_factor, image_rgb.shape[0] // downscale_factor)
+        image_rgb = cv2.resize(image_rgb, new_size, interpolation=cv2.INTER_AREA)
+        manual_mask = cv2.resize(manual_mask, new_size, interpolation=cv2.INTER_NEAREST)
+        fov_mask = cv2.resize(fov_mask, new_size, interpolation=cv2.INTER_NEAREST)
 
     preprocessed = preprocess_image(image_rgb)
 
